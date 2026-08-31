@@ -20,6 +20,10 @@ def _strategy() -> str:
             "Refusing to boot rather than silently falling back — a deployment that thinks it "
             "swapped a port and did not is the failure this check exists to prevent."
         )
+    if value == "root":
+        from .tenant import configured_tenant
+
+        configured_tenant()
     return value
 
 

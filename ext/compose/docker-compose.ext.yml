@@ -21,6 +21,5 @@ services:
       - ../../ext/vexa_ext:/app/src/vexa_ext:ro
     environment:
       - VEXA_EXT_STRATEGY=${VEXA_EXT_STRATEGY:-postwrap}
-      - VEXA_EXT_DEFAULT_TENANT=${VEXA_EXT_DEFAULT_TENANT:-unassigned}
-      - VEXA_EXT_TENANT_MAP=${VEXA_EXT_TENANT_MAP:-}
+      - VEXA_EXT_TENANT_ID=${VEXA_EXT_TENANT_ID:-}
     command: ["python", "-m", "vexa_ext"]

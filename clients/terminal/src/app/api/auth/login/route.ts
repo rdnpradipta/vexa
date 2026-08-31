@@ -1,12 +1,13 @@
-/** Direct email login — no SMTP, no magic link. POST {email} → find-or-create the user at admin-api,
- *  mint an APIToken (scopes bot,tx,browser), set the httpOnly `vexa-token` + `vexa-user-info` cookies.
- *
- *  Mirrors the dashboard's VEXA_ALLOW_DIRECT_LOGIN branch (without importing it). No email is ever sent.
- *  Must never be cached — a cached response would pin one identity for every subsequent login.
+/** Protected local login for deployments without OAuth. POST {email,password} verifies an exact configured
+ * email allowlist and constant-time scrypt result before calling admin-api to find/create the user and mint
+ * an APIToken. The route returns 404 when local login is not fully configured.
  */
+import { createHash } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { AUTH_COOKIE, USER_INFO_COOKIE, findOrCreateUserToken } from "../adminApi";
+import { directLoginConfigured, verifyDirectLogin } from "../directLogin";
+import { finishLoginAttempt, loginRetryAfterSeconds, reserveLoginAttempt } from "../loginRateLimit";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -22,10 +23,22 @@ function isSecureRequest(): boolean {
   );
 }
 
+function clientFingerprint(request: NextRequest): string {
+  const forwarded = request.headers.get("cf-connecting-ip")
+    || request.headers.get("x-forwarded-for")?.split(",", 1)[0]?.trim()
+    || "unknown";
+  return createHash("sha256").update(forwarded).digest("hex");
+}
+
 export async function POST(request: NextRequest) {
+  if (!directLoginConfigured()) {
+    return NextResponse.json({ error: "Not found" }, { status: 404, headers: NO_STORE });
+  }
+
   let email: unknown;
+  let password: unknown;
   try {
-    ({ email } = await request.json());
+    ({ email, password } = await request.json());
   } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400, headers: NO_STORE });
   }
@@ -37,13 +50,27 @@ export async function POST(request: NextRequest) {
   if (!EMAIL_RE.test(normalized)) {
     return NextResponse.json({ error: "Invalid email format" }, { status: 400, headers: NO_STORE });
   }
-  // Direct email login is a DEBUG path only — real sign-in goes through Google/Microsoft OAuth
-  // (api/auth/[...nextauth]). Restrict it to test accounts so it can't be used as a password-less bypass.
-  if (!normalized.includes("test")) {
+  const reservation = reserveLoginAttempt(clientFingerprint(request));
+  if (!reservation) {
     return NextResponse.json(
-      { error: "Direct email login is for test accounts only — use Google or Microsoft sign-in." },
-      { status: 403, headers: NO_STORE },
+      { error: "Too many login attempts" },
+      { status: 429, headers: { ...NO_STORE, "Retry-After": String(loginRetryAfterSeconds()) } },
     );
+  }
+
+  let valid = false;
+  try {
+    valid = typeof password === "string"
+      && password.length > 0
+      && password.length <= 1024
+      && await verifyDirectLogin(normalized, password);
+  } catch {
+    finishLoginAttempt(reservation, false);
+    return NextResponse.json({ error: "Login unavailable" }, { status: 503, headers: NO_STORE });
+  }
+  finishLoginAttempt(reservation, valid);
+  if (!valid) {
+    return NextResponse.json({ error: "Invalid credentials" }, { status: 403, headers: NO_STORE });
   }
 
   const result = await findOrCreateUserToken(normalized);

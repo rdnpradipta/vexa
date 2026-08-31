@@ -1,3 +1,4 @@
+import { scryptSync } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** First-run bootstrap: the unauthenticated /api/auth/instance probe + the sign-in claim call.
@@ -14,6 +15,12 @@ vi.mock("next/headers", () => ({
 
 import { GET as instanceRoute } from "../instance/route";
 import { POST as loginRoute } from "../login/route";
+
+function testScrypt(password: string): string {
+  const salt = Buffer.alloc(16, 9);
+  const hash = scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+  return `scrypt:16384:8:1:${salt.toString("base64url")}:${hash.toString("base64url")}`;
+}
 
 function req(body: unknown) {
   return new Request("http://local/api/auth/login", {
@@ -54,6 +61,8 @@ beforeEach(() => {
   process.env.VEXA_ADMIN_API_URL = "http://admin.test";
   process.env.VEXA_ADMIN_API_KEY = "admin-key";
   process.env.VEXA_INTERNAL_API_SECRET = "internal-secret";
+  process.env.VEXA_DIRECT_LOGIN_EMAILS = "new-test@vexa.ai";
+  process.env.VEXA_DIRECT_LOGIN_PASSWORD_SCRYPT = testScrypt("test-password");
   delete process.env.VEXA_ADMIN_EMAILS;
 });
 
@@ -67,28 +76,28 @@ describe("/api/auth/instance — the login surface's claim-screen switch", () =>
   it("no admin anywhere → admin_exists false (claim screen shows)", async () => {
     stubAdminApi({ adminExists: false });
     const res = await instanceRoute();
-    expect(await res.json()).toEqual({ admin_exists: false });
+    expect(await res.json()).toEqual({ admin_exists: false, direct_login: true });
   });
 
   it("a configured allowlist counts as an existing admin — internal probe not even called", async () => {
     process.env.VEXA_ADMIN_EMAILS = "dmitry@vexa.ai";
     const calls = stubAdminApi({ adminExists: false });
     const res = await instanceRoute();
-    expect(await res.json()).toEqual({ admin_exists: true });
+    expect(await res.json()).toEqual({ admin_exists: true, direct_login: true });
     expect(calls.length).toBe(0);
   });
 
   it("probe unreachable → FAIL-SAFE true (plain sign-in, never a dangling claim screen)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("ECONNREFUSED"); }));
     const res = await instanceRoute();
-    expect(await res.json()).toEqual({ admin_exists: true });
+    expect(await res.json()).toEqual({ admin_exists: true, direct_login: true });
   });
 });
 
 describe("first sign-in claims the admin role", () => {
   it("login on a fresh instance POSTs the bootstrap claim with the user's id", async () => {
     const calls = stubAdminApi({ adminExists: false });
-    const res = await loginRoute(req({ email: "new-test@vexa.ai" }));
+    const res = await loginRoute(req({ email: "new-test@vexa.ai", password: "test-password" }));
     expect(res.status).toBe(200);
     const claim = calls.find((c) => c.url.includes("/internal/bootstrap-admin"));
     expect(claim).toBeDefined();
@@ -98,7 +107,7 @@ describe("first sign-in claims the admin role", () => {
   it("allowlist-run instance → claim machinery stays off", async () => {
     process.env.VEXA_ADMIN_EMAILS = "dmitry@vexa.ai";
     const calls = stubAdminApi({ adminExists: true });
-    const res = await loginRoute(req({ email: "new-test@vexa.ai" }));
+    const res = await loginRoute(req({ email: "new-test@vexa.ai", password: "test-password" }));
     expect(res.status).toBe(200);
     expect(calls.some((c) => c.url.includes("/internal/bootstrap-admin"))).toBe(false);
   });

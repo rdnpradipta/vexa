@@ -1,10 +1,9 @@
 "use client";
 /** Login gate. Polls /api/auth/me on mount; if unauthenticated, renders the sign-in card.
  *  Primary path is OAuth — Google / Microsoft buttons (next-auth/react `signIn`, which works without a
- *  SessionProvider). Enabled providers are discovered from NextAuth's /api/auth/providers so a deploy
- *  with no OAuth creds simply hides the buttons. The direct email form is kept as a DEBUG path (server
- *  restricts it to addresses containing "test"), tucked behind a toggle. Styled to match the terminal
- *  (CSS vars from globals.css); does not redesign the workbench.
+ *  SessionProvider). Enabled providers are discovered from NextAuth's /api/auth/providers. A configured
+ *  local email/password login is exposed only when the server reports that both its exact email allowlist
+ *  and password digest are present.
  *
  *  FIRST RUN: /api/auth/instance says whether an admin exists. On a fresh instance the card becomes
  *  the one-time "Set up your instance" claim screen — first sign-in becomes the admin — through
@@ -20,8 +19,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>("checking");
   const [providers, setProviders] = useState<Providers>({ google: false, microsoft: false });
   const [adminExists, setAdminExists] = useState(true); // fail-safe: plain sign-in until told otherwise
-  const [showDebug, setShowDebug] = useState(false);
+  const [directLogin, setDirectLogin] = useState(false);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +39,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     // First-run probe — {admin_exists:false} flips the card into the admin-claim variant.
     fetch("/api/auth/instance", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { admin_exists: true }))
-      .then((d: { admin_exists?: boolean }) => active && setAdminExists(d.admin_exists !== false))
+      .then((d: { admin_exists?: boolean; direct_login?: boolean }) => {
+        if (!active) return;
+        setAdminExists(d.admin_exists !== false);
+        setDirectLogin(d.direct_login === true);
+      })
       .catch(() => undefined);
     return () => { active = false; };
   }, []);
@@ -47,14 +51,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const value = email.trim();
-    if (!value || submitting) return;
+    if (!value || !password || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
       const r = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: value }),
+        body: JSON.stringify({ email: value, password }),
       });
       if (r.ok) { window.location.reload(); return; }
       const body = (await r.json().catch(() => ({}))) as { error?: string };
@@ -102,16 +106,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
               <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />
               First sign-in = administrator
             </div>
-            {!hasOAuth && (
+            {!hasOAuth && !directLogin && (
               <div
                 style={{
                   fontSize: 11.5, lineHeight: 1.5, color: "var(--t2)", background: "var(--panel2)",
                   border: "1px solid var(--line2)", borderRadius: 8, padding: "9px 11px",
                 }}
               >
-                ⚠ Test mode — no OAuth configured. Sign-in is limited to emails containing &ldquo;test&rdquo;.
-                For real authentication, acquire Google or Microsoft OAuth credentials and add them to this
-                instance&rsquo;s environment (GOOGLE_CLIENT_ID/SECRET or MICROSOFT_CLIENT_ID/SECRET).
+                No sign-in method is configured. Configure Google/Microsoft OAuth or the protected local
+                email/password login before using this instance.
               </div>
             )}
           </>
@@ -130,28 +133,30 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           </button>
         )}
 
-        {hasOAuth && (
-          <button
-            onClick={() => setShowDebug((v) => !v)}
-            style={{ background: "none", border: "none", color: "var(--t3)", fontSize: 11, cursor: "pointer", padding: 0, alignSelf: "flex-start" }}
-          >
-            {showDebug ? "Hide debug sign-in" : "Debug sign-in"}
-          </button>
-        )}
-
-        {(!hasOAuth || showDebug) && (
+        {directLogin && (
           <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ fontSize: 11, color: "var(--t3)", lineHeight: 1.4 }}>
-              {claiming && !hasOAuth
-                ? "Email — must contain “test” (test mode)."
-                : "Debug login — email must contain “test”."}
+              Protected local account
             </div>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="you-test@company.com"
+              placeholder="you@example.com"
+              autoComplete="username"
+              style={{
+                background: "var(--panel2)", border: "1px solid var(--line2)", borderRadius: 7,
+                padding: "9px 10px", color: "var(--t1)", fontSize: 13, outline: "none",
+              }}
+            />
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              autoComplete="current-password"
               style={{
                 background: "var(--panel2)", border: "1px solid var(--line2)", borderRadius: 7,
                 padding: "9px 10px", color: "var(--t1)", fontSize: 13, outline: "none",
@@ -160,12 +165,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
             {error && <div style={{ fontSize: 11, color: "var(--danger)", lineHeight: 1.4 }}>{error}</div>}
             <button
               type="submit"
-              disabled={!email.trim() || submitting}
+              disabled={!email.trim() || !password || submitting}
               style={{
-                background: email.trim() ? "var(--accent)" : "var(--panel2)",
-                color: email.trim() ? "var(--on-accent)" : "var(--t3)",
+                background: email.trim() && password ? "var(--accent)" : "var(--panel2)",
+                color: email.trim() && password ? "var(--on-accent)" : "var(--t3)",
                 border: "none", borderRadius: 7, padding: "9px 10px", fontSize: 13, fontWeight: 600,
-                cursor: email.trim() && !submitting ? "pointer" : "default",
+                cursor: email.trim() && password && !submitting ? "pointer" : "default",
               }}
             >
               {submitting ? "Signing in…" : claiming ? "Sign in as admin" : "Sign in"}

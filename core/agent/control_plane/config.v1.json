@@ -340,6 +340,16 @@
       "targets": []
     },
     {
+      "key": "VEXA_GATEWAY_IDENTITY_SECRET",
+      "class": "defaulted",
+      "default": "(unset — strict gateway identity remains disabled unless VEXA_REQUIRE_GATEWAY_IDENTITY is enabled)",
+      "secret": true,
+      "description": "shared high-entropy service proof verified in constant time when VEXA_REQUIRE_GATEWAY_IDENTITY is enabled",
+      "targets": [
+        "compose"
+      ]
+    },
+    {
       "key": "TRANSCRIPTION_SERVICE_URL",
       "class": "defaulted",
       "default": "(unset)",

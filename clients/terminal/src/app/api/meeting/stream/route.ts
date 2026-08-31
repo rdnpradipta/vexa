@@ -86,9 +86,14 @@ export async function GET(req: NextRequest) {
       signal: abort.signal,
     });
     if (!upstream.ok) {
-      const detail = (await upstream.text().catch(() => "")).trim().replace(/\s+/g, " ");
+      const body = await upstream.arrayBuffer();
       req.signal.removeEventListener("abort", onClientGone);
-      return sseError(detail || `agent-api stream returned ${upstream.status}`, upstream.status);
+      const headers = new Headers();
+      for (const name of ["content-type", "cache-control", "retry-after", "www-authenticate"]) {
+        const value = upstream.headers.get(name);
+        if (value) headers.set(name, value);
+      }
+      return new Response(body, { status: upstream.status, headers });
     }
     if (!upstream.body) {
       req.signal.removeEventListener("abort", onClientGone);

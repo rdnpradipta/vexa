@@ -618,16 +618,32 @@ def test_policy_guard_removes_policy_in_freshly_seeded_workspace(tmp_path):
 
 # ── vector 2 (topology): the opt-in gateway-identity gate rejects non-gateway callers ──────────────
 def test_require_gateway_identity_flag_rejects_direct_edge(tmp_path, monkeypatch):
-    """With VEXA_REQUIRE_GATEWAY_IDENTITY set, a request WITHOUT the gateway's signed marker
+    """With VEXA_REQUIRE_GATEWAY_IDENTITY set, a request WITHOUT the gateway's service proof
     (X-Gateway-Verified) is rejected 401 — a hardened deploy stops a direct/host-local caller from
-    forging X-User-Id. The marker present → normal auth. Default (flag unset) is unaffected."""
+    forging X-User-Id. The valid proof reaches normal auth. Default (flag unset) is unaffected."""
     _init_ws(tmp_path, "wsA")
     monkeypatch.setenv("VEXA_REQUIRE_GATEWAY_IDENTITY", "1")
+    monkeypatch.setenv("VEXA_GATEWAY_IDENTITY_SECRET", "expected-service-proof")
     c = _client(tmp_path)
     # direct caller forging X-User-Id but lacking the gateway marker → 401
     r = c.get("/api/workspace/members?workspace_id=wsA", headers={"X-User-Id": "attacker"})
     assert r.status_code == 401
-    # gateway-fronted request (marker present) reaches the normal role gate (403 non-member, not 401)
+    # gateway-fronted request (valid service proof) reaches the normal role gate (403 non-member, not 401)
     r2 = c.get("/api/workspace/members?workspace_id=wsA",
-               headers={"X-User-Id": "attacker", "X-Gateway-Verified": "1"})
+               headers={"X-User-Id": "attacker", "X-Gateway-Verified": "expected-service-proof"})
     assert r2.status_code == 403
+
+
+def test_require_gateway_identity_rejects_forged_nonempty_marker(tmp_path, monkeypatch):
+    """A marker is service authentication, not a boolean. Any non-empty client value must fail unless
+    it exactly matches the deployment's gateway identity secret."""
+    _init_ws(tmp_path, "wsA")
+    monkeypatch.setenv("VEXA_REQUIRE_GATEWAY_IDENTITY", "1")
+    monkeypatch.setenv("VEXA_GATEWAY_IDENTITY_SECRET", "expected-service-proof")
+    c = _client(tmp_path)
+
+    r = c.get(
+        "/api/workspace/members?workspace_id=wsA",
+        headers={"X-User-Id": "attacker", "X-Gateway-Verified": "forged-but-nonempty"},
+    )
+    assert r.status_code == 401

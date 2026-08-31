@@ -17,10 +17,11 @@
 ARG RUNTIME_DEPS=prod
 
 # node:22 — tinykeys@4 requires node >=22; 20 only warns but we pin 22 to match engines.
-FROM node:22-slim AS build
+FROM node:22-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 # Google Analytics measurement id (G-XXXXXXXXXX). NEXT_PUBLIC_* is inlined into the client bundle at
 # BUILD time, so it must be present BEFORE `next build` (pass via --build-arg / compose build.args).
@@ -45,7 +46,7 @@ RUN npm run build
 # next.config.ts at runtime and npm-installs its own at BOOT when it's absent. `npm i typescript`
 # here CANNOT provide it: NODE_ENV=production makes npm silently omit anything matching a
 # devDependency. So it is COPIED from the build stage — the exact compiler `next build` ran with.
-FROM node:22-slim AS deps-prod
+FROM node:22-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS deps-prod
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
@@ -57,11 +58,12 @@ FROM build AS deps-dev
 # ARG-selected alias (COPY --from does not expand variables; FROM does).
 FROM deps-${RUNTIME_DEPS} AS deps
 
-FROM node:22-slim AS runtime
+FROM node:22-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS runtime
 # The server-side proxy gate reads the mode at REQUEST time (process.env), so the runtime stage must
 # carry the same value the bundle was built with — client gating and edge gating stay in lockstep.
 ARG NEXT_PUBLIC_TERMINAL_MODE=""
 ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOST=0.0.0.0 \
     NEXT_PUBLIC_TERMINAL_MODE=$NEXT_PUBLIC_TERMINAL_MODE

@@ -242,6 +242,7 @@ services:
       # every service that REFUSES it at boot; these two lines kept it, so an unconfigured stack
       # still PRESENTED the published literal as internal-tier authority. Unset is unset (A19).
       - VEXA_INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
+      - VEXA_GATEWAY_IDENTITY_SECRET=${GATEWAY_IDENTITY_SECRET:-}
       # Identity (P20): agent-api derives the subject from the gateway-injected X-User-Id. Until the terminal
       # routes through the gateway (Stage 4), it still reaches agent-api directly with no header, so this
       # single-user fallback keeps the dev stack working (shared subject). Remove it once the gateway fronts
@@ -425,6 +426,7 @@ services:
       - AGENT_API_URL=${AGENT_API_URL:-http://agent-api:8100}
       - REDIS_URL=redis://redis:6379/0
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      - GATEWAY_IDENTITY_SECRET=${GATEWAY_IDENTITY_SECRET:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # fastapi-guard edge layer (edge_guard.py): per-IP throttle + auto-ban at the edge.
       # ON by default with generous limits (owner ruling — protection that ships dark protects

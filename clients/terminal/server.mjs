@@ -37,10 +37,13 @@ const AUTH_COOKIE = process.env.VEXA_AUTH_COOKIE_NAME || "vexa-token";
  *  user_id from this key at connect and auto-subscribes the socket to `u:{user_id}:meetings` — so it MUST
  *  be the same per-user key the REST proxy forwards (src/app/api/proxyAuth.ts), else the live meeting.status
  *  frames land on a different user's channel and the client's list never advances past its last snapshot.
- *  Resolution mirrors proxyAuth.ts: cookie token → VEXA_API_KEY → VEXA_BOT_API_KEY → "". */
+ *  Resolution order: explicit X-API-Key → cookie token → VEXA_API_KEY → VEXA_BOT_API_KEY → "". */
 function resolveUpstreamKey(req) {
+  const explicit = Array.isArray(req.headers["x-api-key"])
+    ? req.headers["x-api-key"][0]
+    : req.headers["x-api-key"];
   const cookieToken = readCookie(req.headers.cookie, AUTH_COOKIE);
-  return cookieToken || process.env.VEXA_API_KEY || process.env.VEXA_BOT_API_KEY || "";
+  return explicit || cookieToken || process.env.VEXA_API_KEY || process.env.VEXA_BOT_API_KEY || "";
 }
 
 /** Pull a single cookie value out of a raw `Cookie` header. Returns undefined if absent. */

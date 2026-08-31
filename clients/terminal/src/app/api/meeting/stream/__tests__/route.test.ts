@@ -163,6 +163,18 @@ describe("meeting stream SSE proxy — downstream termination", () => {
     expect(upstreamSignal?.aborted, "downstream cancel must abort the upstream fetch").toBe(true);
   });
 
+  it("preserves an upstream authorization denial status, body, and content type", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ detail: "meeting not owned by authenticated user" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    )));
+
+    const res = await GET(makeReq("?meeting_id=foreign-row"));
+    expect(res.status).toBe(403);
+    expect(res.headers.get("Content-Type")).toContain("application/json");
+    expect(await res.json()).toEqual({ detail: "meeting not owned by authenticated user" });
+  });
+
   it("returns an SSE error frame (does not hang) when the upstream fetch rejects", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new Error("connect ECONNREFUSED");

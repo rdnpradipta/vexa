@@ -1,0 +1,359 @@
+# Production overlay for a dedicated, single-tenant Vexa instance.
+# Merge after deploy/compose/docker-compose.yml. Applications remain private; only credential-free
+# origin relays bind the documented loopback and private-tailnet addresses.
+
+name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}
+
+x-hardened: &hardened
+  init: false
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 256
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  redis:
+    <<: *hardened
+    user: "999:1000"
+    ports: !reset []
+    mem_limit: 512m
+    cpus: 0.75
+    networks: !override [data, workload]
+
+  postgres:
+    <<: *hardened
+    user: "70:70"
+    ports: !reset []
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      POSTGRES_DB: ${DB_NAME:?DB_NAME is required}
+      POSTGRES_USER: ${DB_USER:?DB_USER is required}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      TZ: UTC
+      PGTZ: UTC
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /var/run/postgresql:rw,nosuid,nodev,uid=70,gid=70,mode=0775,size=16m
+    networks: !override [data]
+
+  minio:
+    <<: *hardened
+    ports: !reset []
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+    volumes:
+      - minio-data:/data:z
+    networks: !override [data]
+
+  minio-init:
+    <<: *hardened
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.25
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /root/.mc:rw,noexec,nosuid,size=8m
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vexa}
+    entrypoint:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
+        mc alias set vexa http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "vexa/$${MINIO_BUCKET}"
+    networks: !override [data]
+
+  admin-api:
+    <<: *hardened
+    ports: !reset []
+    mem_limit: 512m
+    cpus: 0.75
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:?DB_NAME is required}
+      DB_USER: ${DB_USER:?DB_USER is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      ADMIN_API_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks: !override [control, data]
+
+  runtime:
+    <<: *hardened
+    ports: !reset []
+    mem_limit: 1g
+    cpus: 1.0
+    group_add: !override
+      - ${DOCKER_GID:?DOCKER_GID is required}
+    environment:
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
+      VEXA_DISPATCH_SIGNING_KEY: ${VEXA_DISPATCH_SIGNING_KEY:?VEXA_DISPATCH_SIGNING_KEY is required}
+      VEXA_AGENT_SRC_MOUNT: ""
+      DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_workload
+      REDIS_URL: redis://redis:6379/0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      - /run/user/980/docker.sock:/var/run/docker.sock
+    networks: !override [control, data]
+
+  agent-api:
+    <<: *hardened
+    ports: !reset []
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      VEXA_AGENT_DEFAULT_SUBJECT: ""
+      VEXA_REQUIRE_GATEWAY_IDENTITY: "true"
+      VEXA_GATEWAY_IDENTITY_SECRET: ${GATEWAY_IDENTITY_SECRET:?GATEWAY_IDENTITY_SECRET is required}
+      VEXA_INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
+      VEXA_DISPATCH_SIGNING_KEY: ${VEXA_DISPATCH_SIGNING_KEY:?VEXA_DISPATCH_SIGNING_KEY is required}
+      VEXA_AGENT_API_PORT: "8100"
+      VEXA_RUNTIME_API_URL: http://runtime:8090
+      VEXA_MEETING_API_URL: http://meeting-api:8080
+      VEXA_AGENT_API_SELF_URL: http://agent-api:8100
+      VEXA_ADMIN_API_URL: http://admin-api:8001
+      VEXA_GATEWAY_URL: http://gateway:8000
+      VEXA_REDIS_URL: redis://redis:6379/0
+      VEXA_WORKSPACES_DIR: /workspaces
+      VEXA_WORKSPACE_MOUNT_SOURCE: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_agent-workspaces
+      VEXA_LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks: !override [control, data]
+
+  meeting-api:
+    <<: *hardened
+    build:
+      context: ../..
+      dockerfile: ext/compose/Dockerfile.meeting-api-production
+    image: localhost/vexa-meeting-api-ext:${IMAGE_TAG:-hardened}
+    command: ["python", "-m", "vexa_ext"]
+    ports: !reset []
+    mem_limit: 1g
+    cpus: 1.5
+    environment:
+      VEXA_EXT_STRATEGY: root
+      VEXA_EXT_TENANT_ID: ${VEXA_EXT_TENANT_ID:?VEXA_EXT_TENANT_ID is required}
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:?DB_NAME is required}
+      DB_USER: ${DB_USER:?DB_USER is required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      REDIS_URL: redis://redis:6379/0
+      RUNTIME_API_URL: http://runtime:8090
+      ADMIN_API_URL: http://admin-api:8001
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required}
+      MINIO_BUCKET: ${MINIO_BUCKET:-vexa}
+      MINIO_SECURE: "false"
+      RECORDING_ENABLED: "false"
+      TRANSCRIBE_ENABLED: "false"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks: !override [control, data, workload]
+
+  gateway:
+    <<: *hardened
+    ports: !reset []
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      ADMIN_API_URL: http://admin-api:8001
+      MEETING_API_URL: http://meeting-api:8080
+      AGENT_API_URL: http://agent-api:8100
+      MCP_URL: http://mcp:8010
+      REDIS_URL: redis://redis:6379/0
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
+      GATEWAY_IDENTITY_SECRET: ${GATEWAY_IDENTITY_SECRET:?GATEWAY_IDENTITY_SECRET is required}
+      GUARD_ENABLED: "true"
+      GUARD_ENABLE_REDIS: "true"
+      GUARD_WS_ENABLED: "true"
+      GUARD_TRUST_X_FORWARDED_PROTO: "false"
+      GUARD_TRUSTED_PROXIES: "10.250.40.2,10.250.40.3"
+      GUARD_RATE_LIMIT_RPM: "120"
+      GUARD_RATE_LIMIT_WINDOW: "60"
+      GUARD_AUTO_BAN_THRESHOLD: "10"
+      GUARD_AUTO_BAN_DURATION: "3600"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks: !override
+      control: {}
+      data: {}
+      ingress:
+        ipv4_address: 10.250.40.4
+
+  origin-proxy:
+    <<: *hardened
+    build:
+      context: ../..
+      dockerfile: ext/compose/Dockerfile.origin-proxy
+    image: localhost/vexa-origin-proxy:${IMAGE_TAG:-hardened}
+    ports: !override
+      - "127.0.0.1:18056:8080"
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    environment:
+      LISTEN_HOST: "0.0.0.0"
+      LISTEN_PORT: "8080"
+      UPSTREAM_HOST: gateway
+      UPSTREAM_PORT: "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: !override
+      ingress:
+        ipv4_address: 10.250.40.2
+      origin: {}
+
+  tailnet-origin-proxy-v2:
+    <<: *hardened
+    image: caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    user: "65532:65532"
+    ports: !override
+      - "100.71.128.112:18058:8080"
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    volumes: !override
+      - type: bind
+        source: /home/svc-hermes/.config/vexa/gateway-origin.Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          selinux: z
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,uid=65532,gid=65532
+      - /data:rw,noexec,nosuid,size=16m,uid=65532,gid=65532
+      - /config:rw,noexec,nosuid,size=16m,uid=65532,gid=65532
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/relay-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: !override
+      ingress:
+        ipv4_address: 10.250.40.3
+      origin: {}
+
+  mcp:
+    <<: *hardened
+    ports: !reset []
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      GATEWAY_URL: http://gateway:8000
+      PORT: "8010"
+      VEXA_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    networks: !override [control]
+
+  terminal:
+    <<: *hardened
+    profiles: ["internal-ui"]
+    user: "65532:65532"
+    ports: !reset []
+    mem_limit: 1g
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,uid=65532,gid=65532
+      - /app/.next/cache:rw,noexec,nosuid,size=64m,uid=65532,gid=65532
+    environment:
+      NODE_ENV: production
+      GATEWAY_URL: http://gateway:8000
+      AGENT_API_URL: http://agent-api:8100
+      VEXA_ADMIN_API_URL: http://admin-api:8001
+      VEXA_API_URL: http://gateway:8000
+      VEXA_ADMIN_API_KEY: ${ADMIN_TOKEN:?ADMIN_TOKEN is required}
+      VEXA_INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
+      NEXTAUTH_URL: https://vexa.ardian.dev
+      VEXA_DIRECT_LOGIN_EMAILS: ${VEXA_DIRECT_LOGIN_EMAILS:?VEXA_DIRECT_LOGIN_EMAILS is required}
+      VEXA_DIRECT_LOGIN_PASSWORD_SCRYPT: ${VEXA_DIRECT_LOGIN_PASSWORD_SCRYPT:?VEXA_DIRECT_LOGIN_PASSWORD_SCRYPT is required}
+      VEXA_LOGIN_CLIENT_FAILURE_LIMIT: "5"
+      VEXA_LOGIN_GLOBAL_FAILURE_LIMIT: "30"
+      VEXA_LOGIN_RATE_WINDOW_SECONDS: "900"
+    restart: unless-stopped
+    networks: !override [control, ui_ingress]
+
+  terminal-origin-proxy:
+    <<: *hardened
+    profiles: ["internal-ui"]
+    image: caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    user: "65532:65532"
+    ports: !override
+      - "100.71.128.112:18059:8080"
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    volumes: !override
+      - type: bind
+        source: /home/svc-hermes/.config/vexa/terminal-origin.Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          selinux: z
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,uid=65532,gid=65532
+      - /data:rw,noexec,nosuid,size=16m,uid=65532,gid=65532
+      - /config:rw,noexec,nosuid,size=16m,uid=65532,gid=65532
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/relay-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      terminal:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: !override [ui_ingress, origin]
+
+networks:
+  control:
+    driver: bridge
+    internal: true
+  data:
+    driver: bridge
+    internal: true
+  workload:
+    driver: bridge
+    internal: false
+  origin:
+    driver: bridge
+    internal: false
+  ingress:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.250.40.0/24
+  ui_ingress:
+    driver: bridge
+    internal: true

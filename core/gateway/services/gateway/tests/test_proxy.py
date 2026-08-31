@@ -227,6 +227,19 @@ def test_authority_header_families_are_recognised_by_prefix():
         assert not _is_authority_header(name), name
 
 
+def test_gateway_identity_proof_is_injected_and_client_spoof_is_stripped(monkeypatch):
+    monkeypatch.setenv("GATEWAY_IDENTITY_SECRET", "expected-service-proof")
+    client, downstream = _client()
+
+    r = client.get(
+        "/agent/models",
+        headers={**AUTH, "X-Gateway-Verified": "forged-client-value"},
+    )
+
+    assert r.status_code == 200
+    assert downstream.last["headers"]["x-gateway-verified"] == "expected-service-proof"
+
+
 def test_meeting_intent_put_forwards_to_meeting_api():
     """The Meetings surface's Schedule/Cancel action PUTs the user-owned intent; the gateway must
     forward it verbatim to meeting-api's PUT /meetings/{platform}/{native}/intent. Regression: this

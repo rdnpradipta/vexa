@@ -954,6 +954,7 @@ def create_app(
     # them there. OFF by default so the dev/direct topology keeps working. Full fix = route the terminal
     # through the gateway (Stage 4) and make the gateway the only thing that can reach agent-api.
     _require_gateway_identity = os.environ.get("VEXA_REQUIRE_GATEWAY_IDENTITY", "").strip().lower() in ("1", "true", "yes")
+    _gateway_identity_secret = os.environ.get("VEXA_GATEWAY_IDENTITY_SECRET", "")
 
     def subject_of(request: Request) -> str:
         """The authenticated subject (P20). The gateway resolves the api-key → user_id and injects
@@ -965,9 +966,13 @@ def create_app(
         signed identity marker (``X-Gateway-Verified``) — a hardened deploy enforces that identity headers
         were injected by the gateway, not forged by a direct/host-local caller (see the TOPOLOGY BOUNDARY
         note above). This does NOT change the default dev/direct topology."""
-        if _require_gateway_identity and not request.headers.get("x-gateway-verified"):
+        provided_gateway_identity = request.headers.get("x-gateway-verified", "")
+        if _require_gateway_identity and (
+            not _gateway_identity_secret
+            or not hmac.compare_digest(provided_gateway_identity, _gateway_identity_secret)
+        ):
             raise HTTPException(status_code=401,
-                                detail="gateway-signed identity required (VEXA_REQUIRE_GATEWAY_IDENTITY)")
+                                detail="gateway service identity required (VEXA_REQUIRE_GATEWAY_IDENTITY)")
         uid = request.headers.get("x-user-id")
         if uid:
             return uid
