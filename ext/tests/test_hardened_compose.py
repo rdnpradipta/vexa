@@ -153,6 +153,11 @@ def test_production_compose_segments_networks_and_confines_services():
     ]
     assert len(runtime_socket) == 1
     assert runtime_socket[0]["source"] == "/run/user/980/docker.sock"
+    assert "label=disable" in services["runtime"]["security_opt"]
+    assert all(
+        "label=disable" not in service.get("security_opt", [])
+        for name, service in services.items() if name != "runtime"
+    )
     assert all(
         not any(v.get("target") == "/var/run/docker.sock" for v in service.get("volumes", []) if isinstance(v, dict))
         for name, service in services.items() if name != "runtime"

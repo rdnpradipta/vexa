@@ -95,6 +95,12 @@ services:
 
   runtime:
     <<: *hardened
+    # Runtime intentionally controls the rootless Docker daemon to spawn meeting
+    # workloads. Disable SELinux labeling only for this socket-owning service;
+    # every other service remains confined, and the daemon is never exposed over TCP.
+    security_opt: !override
+      - "no-new-privileges:true"
+      - "label=disable"
     ports: !reset []
     mem_limit: 1g
     cpus: 1.0
