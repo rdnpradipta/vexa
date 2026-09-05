@@ -276,9 +276,30 @@ class DockerBackend:
             raise RuntimeError(f"docker create {name} failed ({r.status_code}): {r.text.strip()}")
         cid = r.json().get("Id", name)
 
-        s = self._req("POST", f"/containers/{cid}/start")
-        if s.status_code not in (204, 304):
-            raise RuntimeError(f"docker start {name} failed ({s.status_code}): {s.text.strip()}")
+        try:
+            s = self._req("POST", f"/containers/{cid}/start")
+            if s.status_code not in (204, 304):
+                raise RuntimeError(
+                    f"docker start {name} failed ({s.status_code}): {s.text.strip()}"
+                )
+        except Exception:
+            # Docker create succeeded but start did not. Remove the inert container so it cannot
+            # consume resources or block a deterministic-name retry. Preserve the original error.
+            try:
+                cleanup = self._req(
+                    "DELETE", f"/containers/{cid}?force=true", timeout=30,
+                )
+                if cleanup.status_code not in (204, 404):
+                    logger.error(
+                        "failed to clean up container %s after start failure (%s): %s",
+                        name, cleanup.status_code, cleanup.text.strip()[:300],
+                    )
+            except Exception as cleanup_error:  # noqa: BLE001 — preserve the start failure
+                logger.error(
+                    "failed to clean up container %s after start failure: %s",
+                    name, cleanup_error,
+                )
+            raise
         return WorkloadHandle(id=workload_id, impl=name)
 
     def find(self, workload_id: str) -> Optional[WorkloadHandle]:

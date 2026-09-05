@@ -11,6 +11,9 @@ These never touch a real daemon: the unix-socket session is faked so we can asse
 /images/create pull call. Also exercises the worker create spec using the worker image name."""
 from __future__ import annotations
 
+import pytest
+import requests
+
 from runtime_kernel.docker_backend import DockerBackend
 from runtime_kernel.profiles import Runnable
 
@@ -174,3 +177,28 @@ def test_worker_create_spec_injects_anthropic_route_env(monkeypatch):
     assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
     assert env["ANTHROPIC_MODEL"] == "deepseek/deepseek-v4-pro"
     assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "deepseek/deepseek-v4-flash"
+
+
+def test_start_timeout_removes_created_container():
+    """A timeout after Docker create must not leave an inert, name-blocking container behind."""
+
+    class StartTimeoutSession(FakeSession):
+        def request(self, method, url, **kw):
+            path = "/" + url.split("%2F", 1)[1].split("/", 1)[1] if "%2F" in url else url
+            self.calls.append((method, path))
+            if method == "POST" and path.startswith("/containers/create"):
+                return FakeResp(201, body={"Id": "cid-timeout"})
+            if method == "POST" and path == "/containers/cid-timeout/start":
+                raise requests.ReadTimeout("docker start timed out")
+            if method == "DELETE" and path == "/containers/cid-timeout?force=true":
+                return FakeResp(204)
+            return FakeResp(500, "no route")
+
+    backend = DockerBackend()
+    session = StartTimeoutSession({})
+    backend._session = session
+
+    with pytest.raises(requests.ReadTimeout):
+        backend.start("mtg-timeout", Runnable(image="vexaai/vexa-bot:test"), {})
+
+    assert ("DELETE", "/containers/cid-timeout?force=true") in session.calls

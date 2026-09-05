@@ -945,10 +945,41 @@ class HttpRuntimeClient:
         self._url = runtime_api_url.rstrip("/")
 
     async def create_workload(self, spec: dict) -> dict:
-        resp = await self._client.post(f"{self._url}/workloads", json=spec, timeout=30.0)
+        import httpx
+
+        expected_status = 201
+        try:
+            # Runtime's Docker start plus its start-failure compensation can each take up to 30s.
+            # Keep the caller timeout above that server-side envelope so the normal failure response
+            # wins over a client-side timeout.
+            resp = await self._client.post(
+                f"{self._url}/workloads", json=spec, timeout=75.0,
+            )
+        except httpx.HTTPError as e:
+            # A lost POST response is outcome-ambiguous: the idempotent create may have started the
+            # workload before transport failed. Reconcile by the caller-assigned workload ID rather
+            # than falsely terminalizing a live meeting. Runtime persists start_failed records, so a
+            # dead spawn is also visible here as stopped/destroyed.
+            workload_id = spec.get("workloadId")
+            if not workload_id:
+                raise SpawnFailed("runtime kernel request failed before workload reconciliation") from e
+            try:
+                probe = await self._client.get(
+                    f"{self._url}/workloads/{workload_id}", timeout=10.0,
+                )
+            except httpx.HTTPError:
+                raise  # still ambiguous; do not falsely mark a possibly-live meeting failed
+            if probe.status_code == 404:
+                raise SpawnFailed(
+                    "runtime workload not found after transport failure"
+                ) from e
+            if probe.status_code != 200:
+                raise  # still ambiguous; preserve the original transport failure
+            expected_status = 200
+            resp = probe
         if resp.status_code == 429:
             raise QuotaExceeded("runtime kernel: owner quota exceeded")
-        if resp.status_code != 201:
+        if resp.status_code != expected_status:
             # Carry the kernel's own reason (its {detail}) so the 502 the user sees NAMES the cause
             # — e.g. "No such image: …" for an absent bot image (#718 C1 → C2).
             raise SpawnFailed(f"runtime kernel returned {resp.status_code}: {_reason(resp)}")

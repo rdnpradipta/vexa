@@ -559,6 +559,58 @@ async def test_http_runtime_client_create_refuses_dead_workload():
     assert (await live.create_workload(spec))["state"] == "starting"
 
 
+async def test_http_runtime_client_create_reconciles_ambiguous_timeout():
+    """A lost POST response must be reconciled before declaring a possibly-live workload failed."""
+    import httpx
+
+    from meeting_api.bot_spawn.adapters import HttpRuntimeClient
+
+    class _Resp:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"workloadId": "mtg-41-timeout", "state": "running"}
+
+    class _TimedOutThenLiveHttp:
+        async def post(self, url, json=None, timeout=None):
+            raise httpx.ReadTimeout("runtime start did not answer")
+
+        async def get(self, url, timeout=None):
+            return _Resp()
+
+    runtime = HttpRuntimeClient(_TimedOutThenLiveHttp(), "http://runtime:8090")
+    result = await runtime.create_workload(
+        {"workloadId": "mtg-41-timeout", "profile": "meeting-bot", "env": {}},
+    )
+    assert result["state"] == "running"
+
+
+async def test_http_runtime_client_create_translates_confirmed_timeout_failure():
+    """A timed-out POST with no runtime record is a confirmed spawn failure."""
+    import httpx
+    import pytest
+
+    from meeting_api.bot_spawn.adapters import HttpRuntimeClient
+    from meeting_api.bot_spawn.ports import SpawnFailed
+
+    class _Resp:
+        status_code = 404
+
+    class _TimedOutThenMissingHttp:
+        async def post(self, url, json=None, timeout=None):
+            raise httpx.ReadTimeout("runtime start did not answer")
+
+        async def get(self, url, timeout=None):
+            return _Resp()
+
+    runtime = HttpRuntimeClient(_TimedOutThenMissingHttp(), "http://runtime:8090")
+    with pytest.raises(SpawnFailed, match="not found after transport failure"):
+        await runtime.create_workload(
+            {"workloadId": "mtg-41-timeout", "profile": "meeting-bot", "env": {}},
+        )
+
+
 # ──────────────────────────────────────────────────────────────────────────────────────────────
 # (b3) CC5 — a workload that DIES before the bot reports drives the meeting to `failed` (no hang).
 # ──────────────────────────────────────────────────────────────────────────────────────────────
