@@ -153,6 +153,8 @@ def test_production_compose_segments_networks_and_confines_services():
     ]
     assert len(runtime_socket) == 1
     assert runtime_socket[0]["source"] == "/run/user/980/docker.sock"
+    assert services["runtime"]["environment"]["BROWSER_IMAGE"] == "vexaai/vexa-bot:v012"
+    assert "hardened-test" not in services["runtime"]["environment"]["BROWSER_IMAGE"]
     assert "label=disable" in services["runtime"]["security_opt"]
     assert all(
         "label=disable" not in service.get("security_opt", [])

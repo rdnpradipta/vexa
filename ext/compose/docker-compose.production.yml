@@ -110,6 +110,10 @@ services:
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET is required}
       VEXA_DISPATCH_SIGNING_KEY: ${VEXA_DISPATCH_SIGNING_KEY:?VEXA_DISPATCH_SIGNING_KEY is required}
       VEXA_AGENT_SRC_MOUNT: ""
+      # The local service IMAGE_TAG must not leak into the separately published
+      # per-meeting bot image. Keep the bot reference explicit and independently
+      # overridable so a restart never points Runtime at a nonexistent local tag.
+      BROWSER_IMAGE: ${BROWSER_IMAGE:-vexaai/vexa-bot:v012}
       DOCKER_NETWORK: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_workload
       REDIS_URL: redis://redis:6379/0
       LOG_LEVEL: ${LOG_LEVEL:-info}
