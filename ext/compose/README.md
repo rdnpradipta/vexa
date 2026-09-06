@@ -51,10 +51,12 @@ This is an **instance-per-tenant boundary**. `ext_tenant` records provenance, wh
 from the dedicated service set, databases, object store, Redis, networks, and volumes. It is not a
 claim of row-level multi-tenant isolation or PostgreSQL RLS.
 
-The canonical production checkout is `/home/svc-hermes/projects/vexa`. Keep deployment changes on
-Git branches in that repository; do not create sibling `vexa-*` deployment copies. Validate without
-creating resources. The env file must include an explicit, stable `COMPOSE_PROJECT_NAME`;
-runtime-spawned workload network and workspace-volume names derive from it:
+The canonical production checkout is `/home/svc-hermes/projects/vexa`; production must be checked out
+on `deploy/hardened-vexa`. Keep deployment changes on Git branches in that repository; do not create
+sibling `vexa-*` deployment copies. The separate `ext/meeting-api-extension-scaffold` branch contains
+only the three extension commits rebased onto `Vexa-ai/vexa:main` and is not the deployment branch.
+Validate without creating resources. The env file must include an explicit, stable
+`COMPOSE_PROJECT_NAME`; runtime-spawned workload network and workspace-volume names derive from it:
 
 ```bash
 docker compose \
