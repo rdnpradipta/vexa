@@ -138,7 +138,7 @@ def test_internal_ui_profile_isolates_terminal_origin():
     assert {"terminal", "terminal-origin-proxy"}.issubset(services)
     assert set(services["terminal"]["networks"]) == {"control", "ui_ingress"}
     assert set(services["terminal-origin-proxy"]["networks"]) == {"origin", "ui_ingress"}
-    assert services["terminal-origin-proxy"]["image"].startswith("caddy@sha256:")
+    assert services["terminal-origin-proxy"]["image"] == "localhost/vexa-caddy-relay:hardened-test"
     ui_relay_config = [
         volume for volume in services["terminal-origin-proxy"]["volumes"]
         if volume.get("target") == "/etc/caddy/Caddyfile"
@@ -152,6 +152,10 @@ def test_internal_ui_profile_isolates_terminal_origin():
         "published": "18059",
         "protocol": "tcp",
     }]
+    assert services["terminal-origin-proxy"]["image"] == "localhost/vexa-caddy-relay:hardened-test"
+    assert services["terminal-origin-proxy"]["build"]["dockerfile"].endswith(
+        "ext/compose/Dockerfile.caddy-relay"
+    )
     assert config["networks"]["ui_ingress"]["internal"] is True
     for name in ("terminal", "terminal-origin-proxy"):
         service = services[name]
@@ -185,7 +189,10 @@ def test_production_compose_segments_networks_and_confines_services():
     assert set(services["gateway"]["networks"]) == {"control", "data", "ingress"}
     assert set(services["origin-proxy"]["networks"]) == {"ingress", "origin"}
     assert set(services["tailnet-origin-proxy-v2"]["networks"]) == {"ingress", "origin"}
-    assert services["tailnet-origin-proxy-v2"]["image"].startswith("caddy@sha256:")
+    assert services["tailnet-origin-proxy-v2"]["image"] == "localhost/vexa-caddy-relay:hardened-test"
+    assert services["tailnet-origin-proxy-v2"]["build"]["dockerfile"].endswith(
+        "ext/compose/Dockerfile.caddy-relay"
+    )
     relay_config = [
         volume for volume in services["tailnet-origin-proxy-v2"]["volumes"]
         if volume.get("target") == "/etc/caddy/Caddyfile"

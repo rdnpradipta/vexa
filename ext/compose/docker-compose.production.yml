@@ -247,7 +247,11 @@ services:
 
   tailnet-origin-proxy-v2:
     <<: *hardened
-    image: caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    build:
+      context: ../..
+      dockerfile: ext/compose/Dockerfile.caddy-relay
+    image: localhost/vexa-caddy-relay:${IMAGE_TAG:-hardened}
+    pull_policy: never
     user: "65532:65532"
     ports: !override
       - "100.71.128.112:18058:8080"
@@ -327,7 +331,11 @@ services:
   terminal-origin-proxy:
     <<: *hardened
     profiles: ["internal-ui"]
-    image: caddy@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
+    build:
+      context: ../..
+      dockerfile: ext/compose/Dockerfile.caddy-relay
+    image: localhost/vexa-caddy-relay:${IMAGE_TAG:-hardened}
+    pull_policy: never
     user: "65532:65532"
     ports: !override
       - "100.71.128.112:18059:8080"
