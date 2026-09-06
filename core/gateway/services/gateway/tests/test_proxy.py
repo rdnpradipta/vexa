@@ -186,7 +186,7 @@ def test_identity_headers_injected_and_spoof_stripped():
     assert fwd["x-api-key"] == VALID_KEY
 
 
-def test_internal_tier_header_is_stripped_from_a_public_request():
+def test_internal_tier_header_is_stripped_from_a_public_request(monkeypatch):
     """F95 — the internal tier is not reachable from the public edge.
 
     `/agent/{path}` maps to agent-api `/api/{path}`, and agent-api's `_internal_caller` (with
@@ -196,7 +196,8 @@ def test_internal_tier_header_is_stripped_from_a_public_request():
     compose default was a literal in a public repository, and the exact value the comparison used —
     arrived at agent-api and was believed.
 
-    The header must not reach the downstream at all, whatever value it carries."""
+    The client values must not reach the downstream; the gateway may replace its own proof."""
+    monkeypatch.setenv("GATEWAY_IDENTITY_SECRET", "trusted-gateway-proof")
     client, downstream = _client()
     r = client.get("/bots/status", headers={
         **AUTH,
@@ -207,9 +208,9 @@ def test_internal_tier_header_is_stripped_from_a_public_request():
     })
     assert r.status_code == 200
     fwd = downstream.last["headers"]
-    for spoofed in ("x-internal-secret", "x-vexa-internal-api-secret",
-                    "x-admin-api-key", "x-gateway-verified"):
+    for spoofed in ("x-internal-secret", "x-vexa-internal-api-secret", "x-admin-api-key"):
         assert spoofed not in fwd, f"{spoofed} reached the downstream from a public request"
+    assert fwd["x-gateway-verified"] == "trusted-gateway-proof"
     # The strip is by FAMILY, not by a list that rots: a header nobody has invented yet, spelled
     # inside one of the internal families, is stripped for free.
     assert "x-user-id" in fwd and fwd["x-user-id"] == "7"

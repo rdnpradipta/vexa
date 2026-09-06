@@ -19,6 +19,14 @@ x-hardened: &hardened
       max-file: "3"
 
 services:
+  # Preserve the currently deployed domain set after rebasing. Upstream's new
+  # flows services remain opt-in until their credentials and policy are reviewed.
+  flows-api:
+    profiles: ["flows"]
+
+  flows-worker:
+    profiles: ["flows"]
+
   redis:
     <<: *hardened
     user: "999:1000"
