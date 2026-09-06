@@ -84,6 +84,23 @@ def test_production_compose_exposes_only_origin_proxy_on_loopback():
     }]
 
 
+def test_agent_api_has_exclusive_provider_egress_without_published_ingress():
+    config = _production_config()
+    services = config["services"]
+
+    assert config["networks"]["provider_egress"].get("internal", False) is False
+    assert set(services["agent-api"]["networks"]) == {
+        "control", "data", "provider_egress",
+    }
+    assert "workload" not in services["agent-api"]["networks"]
+    assert {
+        name
+        for name, service in services.items()
+        if "provider_egress" in service.get("networks", {})
+    } == {"agent-api"}
+    assert not services["agent-api"].get("ports")
+
+
 def test_production_compose_fails_closed_and_bakes_extension():
     config = _production_config()
     services = config["services"]

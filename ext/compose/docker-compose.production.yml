@@ -150,7 +150,7 @@ services:
       VEXA_WORKSPACES_DIR: /workspaces
       VEXA_WORKSPACE_MOUNT_SOURCE: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}_agent-workspaces
       VEXA_LOG_LEVEL: ${LOG_LEVEL:-info}
-    networks: !override [control, data]
+    networks: !override [control, data, provider_egress]
 
   meeting-api:
     <<: *hardened
@@ -365,6 +365,9 @@ networks:
     driver: bridge
     internal: true
   workload:
+    driver: bridge
+    internal: false
+  provider_egress:
     driver: bridge
     internal: false
   origin:
