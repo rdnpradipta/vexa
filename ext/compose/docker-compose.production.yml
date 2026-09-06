@@ -287,9 +287,13 @@ services:
     cpus: 0.5
     environment:
       GATEWAY_URL: http://gateway:8000
+      FLOWS_API_URL: ""
       PORT: "8010"
       VEXA_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on: !override
+      gateway:
+        condition: service_healthy
     networks: !override [control]
 
   terminal:
