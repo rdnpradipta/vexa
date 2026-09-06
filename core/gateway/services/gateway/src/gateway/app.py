@@ -282,6 +282,7 @@ def create_app(
     _unscoped = _assembly.unscoped
 
     app = FastAPI(title="Vexa API Gateway (v0.12)")
+    gateway_identity_secret = os.getenv("GATEWAY_IDENTITY_SECRET", "")
     # The edge: mint/read X-Trace-Id and bind it for the request (logevent.v1 trace_id).
     app.add_middleware(TraceMiddleware)
 
@@ -416,6 +417,8 @@ def create_app(
             headers["x-user-email"] = str(user_data["email"])
         headers["x-user-scopes"] = ",".join(user_data.get("scopes", []))
         headers["x-user-limits"] = str(user_data.get("max_concurrent", 3))
+        if gateway_identity_secret:
+            headers["x-gateway-verified"] = gateway_identity_secret
         # Lane A: the RESOLVED shared-workspace membership ids (never client-declared; /internal/validate
         # returns them). meeting-api authorizes a member's live-transcript subscribe against this set.
         if user_data.get("workspaces"):
