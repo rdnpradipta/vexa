@@ -51,31 +51,42 @@ This is an **instance-per-tenant boundary**. `ext_tenant` records provenance, wh
 from the dedicated service set, databases, object store, Redis, networks, and volumes. It is not a
 claim of row-level multi-tenant isolation or PostgreSQL RLS.
 
-Validate without creating resources. The env file must include an explicit, stable
-`COMPOSE_PROJECT_NAME`; runtime-spawned workload network and workspace-volume names derive from it:
+The canonical production checkout is `/home/svc-hermes/projects/vexa`. Keep deployment changes on
+Git branches in that repository; do not create sibling `vexa-*` deployment copies. Validate without
+creating resources. The env file must include an explicit, stable `COMPOSE_PROJECT_NAME`;
+runtime-spawned workload network and workspace-volume names derive from it:
 
 ```bash
 docker compose \
-  --env-file /path/to/production.env \
-  -f deploy/compose/docker-compose.yml \
-  -f ext/compose/docker-compose.production.yml \
-  config -q
+  --project-directory /home/svc-hermes/projects/vexa/deploy/compose \
+  --env-file /home/svc-hermes/.config/vexa/production.env \
+  --profile internal-ui \
+  -p vexa-prod-v5 \
+  -f /home/svc-hermes/projects/vexa/deploy/compose/docker-compose.yml \
+  -f /home/svc-hermes/projects/vexa/ext/compose/docker-compose.production.yml \
+  config --quiet
 ```
 
 Build and start:
 
 ```bash
 docker compose \
-  --env-file /path/to/production.env \
-  -f deploy/compose/docker-compose.yml \
-  -f ext/compose/docker-compose.production.yml \
-  --profile build-only build agent-worker
+  --project-directory /home/svc-hermes/projects/vexa/deploy/compose \
+  --env-file /home/svc-hermes/.config/vexa/production.env \
+  --profile internal-ui \
+  -p vexa-prod-v5 \
+  -f /home/svc-hermes/projects/vexa/deploy/compose/docker-compose.yml \
+  -f /home/svc-hermes/projects/vexa/ext/compose/docker-compose.production.yml \
+  build
 
 docker compose \
-  --env-file /path/to/production.env \
-  -f deploy/compose/docker-compose.yml \
-  -f ext/compose/docker-compose.production.yml \
-  up -d --build --wait
+  --project-directory /home/svc-hermes/projects/vexa/deploy/compose \
+  --env-file /home/svc-hermes/.config/vexa/production.env \
+  --profile internal-ui \
+  -p vexa-prod-v5 \
+  -f /home/svc-hermes/projects/vexa/deploy/compose/docker-compose.yml \
+  -f /home/svc-hermes/projects/vexa/ext/compose/docker-compose.production.yml \
+  up -d --wait --remove-orphans
 ```
 
 Never commit the production environment file or print its values. The deployed secret file must be
